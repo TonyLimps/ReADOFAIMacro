@@ -1,0 +1,104 @@
+CheckOptions:
+  # 命名空间：大驼峰
+  - key: readability-identifier-naming.NamespaceCase
+    value: CamelCase
+
+  # 类：大驼峰（PascalCase）
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+
+  # 结构体：大驼峰
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+
+  # 枚举：大驼峰
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+
+  # Typedef：大驼峰
+  - key: readability-identifier-naming.TypedefCase
+    value: CamelCase
+
+  # 类型别名：大驼峰
+  - key: readability-identifier-naming.TypeAliasCase
+    value: CamelCase
+
+  # 模板参数：大驼峰
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase
+
+  # 函数：小驼峰
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+
+  # 全局函数：小驼峰
+  - key: readability-identifier-naming.GlobalFunctionCase
+    value: camelBack
+
+  # 成员函数：小驼峰
+  - key: readability-identifier-naming.MemberCase
+    value: camelBack
+
+  # const成员函数：小驼峰
+  - key: readability-identifier-naming.ConstexprFunctionCase
+    value: camelBack
+
+  # 局部变量：小驼峰
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+
+  # 全局变量：小驼峰
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: camelBack
+
+  # 静态变量：小驼峰
+  - key: readability-identifier-naming.StaticVariableCase
+    value: camelBack
+
+  # 成员变量：小驼峰
+  - key: readability-identifier-naming.PrivateMemberCase
+    value: camelBack
+
+  # 保护成员：小驼峰
+  - key: readability-identifier-naming.ProtectedMemberCase
+    value: camelBack
+
+  # 公有成员：小驼峰
+  - key: readability-identifier-naming.PublicMemberCase
+    value: camelBack
+
+  # 全局常量：全大写+下划线
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+
+  # 静态常量：全大写+下划线
+  - key: readability-identifier-naming.StaticConstantCase
+    value: UPPER_CASE
+
+  # 成员常量：全大写+下划线
+  - key: readability-identifier-naming.MemberConstantCase
+    value: UPPER_CASE
+
+  # constexpr变量：全大写+下划线
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: UPPER_CASE
+
+  # 枚举值：全大写+下划线
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+
+  # 宏定义：全大写+下划线
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+
+  # 参数变量：小驼峰
+  - key: readability-identifier-naming.ParameterCase
+    value: camelBack
+
+  # 参数包：小驼峰
+  - key: readability-identifier-naming.ParameterPackCase
+    value: camelBack
+
+  # 概念：大驼峰
+  - key: readability-identifier-naming.ConceptCase
+    value: CamelCase

@@ -1,0 +1,82 @@
+---
+Language: Cpp
+
+# 基础格式
+BasedOnStyle: LLVM
+
+# 使用制表符，宽度为4
+UseTab: Always
+TabWidth: 4
+IndentWidth: 4
+ContinuationIndentWidth: 4
+
+# 大括号不换行
+BreakBeforeBraces: Attach
+
+# 命名空间缩进
+NamespaceIndentation: All
+
+# 访问修饰符缩进
+AccessModifierOffset: -4
+
+# 指针和引用对齐 - 靠左
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# 行长度限制
+ColumnLimit: 100
+
+# 空格设置
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInContainerLiterals: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# 连续的空行限制
+MaxEmptyLinesToKeep: 2
+
+# 包含头文件排序
+SortIncludes: CaseInsensitive
+
+# 其他设置
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+BinPackArguments: true
+BinPackParameters: true
+CompactNamespaces: false
+FixNamespaceComments: true
+IncludeBlocks: Preserve
+IndentCaseLabels: true
+IndentPPDirectives: None
+IndentWrappedFunctionNames: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+ReflowComments: true
+Standard: c++20
+
+# 构造函数初始化列表
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+
+# 函数调用参数不换行
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# 注释对齐
+AlignTrailingComments:
+    Kind: Always
+    OverEmptyLines: 0
