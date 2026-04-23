@@ -14,9 +14,36 @@ bool isMouseAtZero() {
 	return false;
 }
 
+void releaseKeys() {
+	for (int key = 1; key < 256; key++) {
+		INPUT up;
+		up.type = INPUT_KEYBOARD;
+		up.ki.wVk = key;
+		up.ki.dwFlags = KEYEVENTF_KEYUP;
+		up.ki.time = 0;
+		up.ki.dwExtraInfo = 0;
+		up.ki.wScan = 0;
+		SendInput(1, &up, sizeof(INPUT));
+	}
+}
+
 namespace ReADOFAIMacro {
 
-
+	std::vector<INPUT> convertInputEvents(const std::vector<InputEvent>& events) {
+		const size_t inputSize = events.size();
+		std::vector<INPUT> inputs;
+		for (int i = 0; i < inputSize; i++) {
+			const auto& e = events[i];
+			INPUT input = {};
+			input.type = INPUT_KEYBOARD;
+			if (!e.state) {
+				input.ki.dwFlags = KEYEVENTF_KEYUP;
+			}
+			input.ki.wVk = *e.key;
+			inputs.push_back(input);
+		}
+		return inputs;
+	}
 
 	WinAPIController::~WinAPIController() {
 		running = false;
@@ -25,47 +52,21 @@ namespace ReADOFAIMacro {
 				thread.join();
 			}
 		}
-		for (int key = 1; key < 256; key++) {
-			INPUT up;
-			up.type = INPUT_KEYBOARD;
-			up.ki.wVk = key;
-			up.ki.dwFlags = KEYEVENTF_KEYUP;
-			up.ki.time = 0;
-			up.ki.dwExtraInfo = 0;
-			up.ki.wScan = 0;
-			SendInput(1, &up, sizeof(INPUT));
-		}
+		releaseKeys();
 	}
-	void WinAPIController::play(const PlayScript& script, VK waitForKey) {
-		const std::vector<std::vector<InputEvent>>& originalInputs = script.getInputs();
-		size_t inputSize = originalInputs.size();
-		std::vector<std::vector<INPUT>> inputs(inputSize);
-		std::vector<std::vector<uint_fast64_t>> timeStamps(inputSize);
-		for (int i = 0; i < inputSize; i++) {
-			for (auto& e : originalInputs[i]) {
-				INPUT input = {};
-				input.type = INPUT_KEYBOARD;
-				if (!e.state) {
-					input.ki.dwFlags = KEYEVENTF_KEYUP;
-				}
-				input.ki.wVk = e.key;
-				inputs[i].push_back(input);
-				timeStamps[i].push_back(e.time);
-			}
-		}
-		while (!(GetAsyncKeyState(waitForKey) & 0x8000)) {}
 
+	void WinAPIController::play(const PlayScript& script, VK waitForKey) {
+		if (running) return;
+		const auto& inputs = convertInputEvents(script.getInputs());
+		auto timeStamps = script.getTimeStamps();
+
+		while (!(GetAsyncKeyState(waitForKey) & 0x8000)) {}
 		uint_fast64_t baseTimeStamp = getTimestampMs();
 		for (auto& v : timeStamps) {
-			for (auto& t : v) {
-				t += baseTimeStamp;
-			}
+			v += baseTimeStamp;
 		}
-		const size_t keyCount = timeStamps.size();
 		running = true;
-		for (int i = 0; i < keyCount; i++) {
-			threads.emplace_back([this, inputs, timeStamps, i] { pressKeys(inputs[i], timeStamps[i]);});
-		}
+		threads.emplace_back([this, inputs, timeStamps] { pressKeys(inputs, timeStamps);});
 		while (!isMouseAtZero()) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
@@ -79,16 +80,7 @@ namespace ReADOFAIMacro {
 				thread.join();
 			}
 		}
-		for (int key = 1; key < 256; key++) {
-			INPUT up;
-			up.type = INPUT_KEYBOARD;
-			up.ki.wVk = key;
-			up.ki.dwFlags = KEYEVENTF_KEYUP;
-			up.ki.time = 0;
-			up.ki.dwExtraInfo = 0;
-			up.ki.wScan = 0;
-			SendInput(1, &up, sizeof(INPUT));
-		}
+		releaseKeys();
 	}
 
 	void WinAPIController::pressKeys(const std::vector<INPUT>& inputs, const std::vector<uint_fast64_t>& timeStamps) const {
@@ -99,7 +91,5 @@ namespace ReADOFAIMacro {
 			i++;
 		}
 	}
-
-
 
 }

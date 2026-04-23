@@ -8,8 +8,10 @@ int main() {
 	std::string path;
 	std::getline(std::cin, path);
 	Level level(path);
-	std::vector<VK> vks{ALPHA_2,E,P,EQUALS};
-	PlayScript script(level,vks);
+	PlayScript script(level);
+	KeySequence keySequence{};
+	keySequence.p1 = P;
+	script.setKeySequence(keySequence);
 	WinAPIController controller;
 	controller.play(script,P);
 }

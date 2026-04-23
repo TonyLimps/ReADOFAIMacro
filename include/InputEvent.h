@@ -119,22 +119,10 @@ namespace ReADOFAIMacro {
 
 		VK fn4,fn3,fn2,fn1,fp1,fp2,fp3,fp4; // 脚8
 		VK fsn4,fsn3,fsn2,fsn1,fsp1,fsp2,fsp3,fsp4; // 脚16
-		KeySequence() :
-					n4(VK::UNKNOWN), n3(VK::UNKNOWN), n2(VK::UNKNOWN), n1(VK::UNKNOWN),
-					p1(VK::UNKNOWN), p2(VK::UNKNOWN), p3(VK::UNKNOWN), p4(VK::UNKNOWN),
-					sn4(VK::UNKNOWN), sn3(VK::UNKNOWN), sn2(VK::UNKNOWN), sn1(VK::UNKNOWN),
-					sp1(VK::UNKNOWN), sp2(VK::UNKNOWN), sp3(VK::UNKNOWN), sp4(VK::UNKNOWN),
-					tn4(VK::UNKNOWN), tn3(VK::UNKNOWN), tn2(VK::UNKNOWN), tn1(VK::UNKNOWN),
-					tp1(VK::UNKNOWN), tp2(VK::UNKNOWN), tp3(VK::UNKNOWN), tp4(VK::UNKNOWN),
-					fn4(VK::UNKNOWN), fn3(VK::UNKNOWN), fn2(VK::UNKNOWN), fn1(VK::UNKNOWN),
-					fp1(VK::UNKNOWN), fp2(VK::UNKNOWN), fp3(VK::UNKNOWN), fp4(VK::UNKNOWN),
-					fsn4(VK::UNKNOWN), fsn3(VK::UNKNOWN), fsn2(VK::UNKNOWN), fsn1(VK::UNKNOWN),
-					fsp1(VK::UNKNOWN), fsp2(VK::UNKNOWN), fsp3(VK::UNKNOWN), fsp4(VK::UNKNOWN) {}
 	};
 
 	struct InputEvent {
-		VK key;
+		VK* key;
 		bool state;
-		uint_fast64_t time;
 	};
 }

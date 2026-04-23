@@ -22,126 +22,113 @@ static double trackAngleDifferenceMidSpin(const double& midSpin, const double& t
 
 namespace ReADOFAIMacro {
 
-	std::vector<uint_fast64_t> getFloorTimeStamps(const Level& level) {
+	auto computeRotationAngles(const Level& level) -> std::vector<double> {
 		std::vector<double> rotationAngles;
 		const size_t floorCount = level.getFloorCount();
-		double bpm = level.getSetting<double>("bpm");
 		rotationAngles.reserve(floorCount);
-		{
-			for (int index = 0; index < floorCount - 1; index++) {
-				const double alpha1 = level.angleAtFloor(index);
-				double alpha2 = level.angleAtFloor(index + 1);
-				if (alpha2 == 999) {
-					if (index+2 == floorCount) {
-						rotationAngles.push_back(999);
-						break;
-					}
-					alpha2 = level.angleAtFloor(index + 2);
-					const double theta = trackAngleDifferenceMidSpin(alpha1, alpha2);
-					// 保留999，让后面处理事件时rotation_angles能和angleData_对齐
+		for (int index = 0; index < floorCount - 1; index++) {
+			const double alpha1 = level.angleAtFloor(index);
+			double alpha2 = level.angleAtFloor(index + 1);
+			if (alpha2 == 999) {
+				if (index+2 == floorCount) {
 					rotationAngles.push_back(999);
-					rotationAngles.push_back(theta);
-					index++;
-				} else {
-					const double theta = trackAngleDifference(alpha1, alpha2);
-					rotationAngles.push_back(theta);
+					break;
 				}
+				alpha2 = level.angleAtFloor(index + 2);
+				const double theta = trackAngleDifferenceMidSpin(alpha1, alpha2);
+				// 保留999，让后面处理事件时rotation_angles能和angleData对齐
+				rotationAngles.push_back(999);
+				rotationAngles.push_back(theta);
+				index++;
+			} else {
+				const double theta = trackAngleDifference(alpha1, alpha2);
+				rotationAngles.push_back(theta);
 			}
 		}
-
-		// 处理事件
-		{
-			size_t size = level.getTwirlRanges().size();
-			for (int index = 0; index < size; index++) {
-				const auto& range = level.getTwirlRanges().at(index);
-				range.forEach([level, &rotationAngles](const size_t floor) {
-					double& theta = rotationAngles.at(floor);
-					if (theta != 360 && !level.isMidSpin(floor+1)) {
-						theta = 360 - theta;
-					}
-				});
-			}
-
-			size = level.getPauses().size();
-			for (int index = 0; index < size; index++) {
-				const auto& pair = level.getPauses().at(index);
-				size_t floor = pair.first;
-				if (level.isMidSpin(floor+1)) {
-					continue;
+		return rotationAngles;
+	}
+	void processTwirl(const Level& level, std::vector<double>& rotationAngles) {
+		const size_t size = level.getTwirlRanges().size();
+		for (int index = 0; index < size; index++) {
+			const auto& range = level.getTwirlRanges().at(index);
+			range.forEach([level, &rotationAngles](const size_t floor) {
+				double& theta = rotationAngles.at(floor);
+				if (theta != 360 && !level.isMidSpin(floor+1)) {
+					theta = 360 - theta;
 				}
-				rotationAngles.at(floor) += pair.second * 180;
-			}
-
-			size = level.getSpeedList().size();
-			for (int index = 0; index < size; index++) {
-				const auto& pair = level.getSpeedList().at(index);
-				const Range& range = pair.first;
-				range.forEach([level, &rotationAngles, &pair, bpm](const size_t floor) {
-					if (level.isMidSpin(floor+1)) return;
-					const double multiplier = pair.second.first / bpm;
-					rotationAngles.at(floor) /= multiplier;
-				});
-			}
+			});
 		}
-		// 将旋转角转换为相对第一次点击时间的毫秒时间戳
-		const size_t size = rotationAngles.size();
+	}
+	void processPause(const Level& level, std::vector<double>& rotationAngles) {
+		const size_t size = level.getPauses().size();
+		for (int index = 0; index < size; index++) {
+			const auto& pair = level.getPauses().at(index);
+			size_t floor = pair.first;
+			if (level.isMidSpin(floor+1)) {
+				continue;
+			}
+			rotationAngles.at(floor) += pair.second * 180;
+		}
+	}
+	void processSetSpeed(const Level& level, std::vector<double>& rotationAngles, double baseBpm) {
+		const size_t size = level.getSpeedList().size();
+		const double levelBpm = level.getSetting<double>("bpm");
+		const double globalMultiplier = baseBpm / levelBpm;
+
+		for (int index = 0; index < size; index++) {
+			const auto& pair = level.getSpeedList().at(index);
+			const Range& range = pair.first;
+			range.forEach([level, &rotationAngles, &pair, levelBpm, globalMultiplier](const size_t floor) {
+				if (level.isMidSpin(floor+1)) return;
+				const double multiplier = pair.second.first / levelBpm / globalMultiplier;
+				rotationAngles.at(floor) /= multiplier;
+			});
+		}
+	}
+	auto computeTimeStamps(const Level& level, std::vector<double>& rotationAngles, double bpm) -> std::vector<uint_fast64_t> {
 		std::vector<uint_fast64_t> timeStamps;
+		const size_t size = rotationAngles.size();
 		timeStamps.reserve(size);
 		timeStamps.push_back(0);
 
 		double accumulatedMs = 0.0;
 
 		for (int index = 1; index < size; index++) {
-			if (level.isMidSpin(index+1)) continue;
+			if (level.isMidSpin(index + 1))
+				continue;
 			const double theta = rotationAngles.at(index);
 			const double relMs = theta / 180.0 / bpm * 60.0 * 1000.0;
 			accumulatedMs += relMs;
 			timeStamps.push_back(static_cast<uint_fast64_t>(std::round(accumulatedMs)));
 		}
-
 		return timeStamps;
 	}
+	PlayScript::PlayScript(const Level& level) {
+		double bpm = level.getSetting<double>("bpm");
+		std::vector<double> rotationAngles = computeRotationAngles(level);
+		processTwirl(level,rotationAngles);
+		processPause(level,rotationAngles);
+		processSetSpeed(level,rotationAngles,bpm);
+		std::vector<uint_fast64_t> floorTimeStamps = computeTimeStamps(level,rotationAngles,bpm);
 
-	PlayScript::PlayScript(const Level& level, const std::vector<VK>& virtualKeys) {
-		const std::vector<uint_fast64_t>& floorTimeStamps = getFloorTimeStamps(level);
-		const size_t floorTimeStampsSize = floorTimeStamps.size();
-		const size_t keyCount = virtualKeys.size();
-		for (int i = 0; i < keyCount; i++) {
-			inputs.emplace_back();
+		const size_t size = floorTimeStamps.size();
+		inputs.reserve(size);
+		const InputEvent down{.key = &keySequence.p1, .state = true};
+		const InputEvent up{.key = &keySequence.p1, .state = false};
+		for (int i = 0; i < size-1; i++) {
+			const uint_fast64_t downTime = floorTimeStamps[i];
+			const uint_fast64_t upTime = (downTime + floorTimeStamps[i+1]) / 2;
+			inputs.push_back(down);
+			timeStamps.push_back(downTime);
+			inputs.push_back(up);
+			timeStamps.push_back(upTime);
 		}
-
-		for (size_t i = 1; i < floorTimeStampsSize - 1; i++) {
-			const size_t keyIndex = i % keyCount;
-			const VK vk = virtualKeys.at(keyIndex);
-			const uint_fast64_t downTime = floorTimeStamps.at(i);
-
-			InputEvent down = {};
-			down.state = true;
-			down.key = vk;
-			down.time = downTime;
-			inputs.at(keyIndex).push_back(down);
-
-			const uint_fast64_t upTime = (floorTimeStamps.at(i) + floorTimeStamps.at(i + 1)) / 2;
-			InputEvent up = {};
-			up.state = false;
-			up.key = vk;
-			up.time = upTime;
-			inputs.at(keyIndex).push_back(up);
-		}
-
-		if (floorTimeStampsSize > 1) {
-			const size_t lastIndex = floorTimeStampsSize - 1;
-			const size_t keyIndex = lastIndex % keyCount;
-			const VK vk = virtualKeys.at(keyIndex);
-
-			const uint_fast64_t downTime = floorTimeStamps.at(lastIndex);
-			InputEvent down = {};
-			down.state = true;
-			down.key = vk;
-			down.time = downTime;
-			inputs.at(keyIndex).push_back(down);
-		}
+		inputs.push_back(down);
+		inputs.push_back(up);
+		const uint_fast64_t downTime = floorTimeStamps[size-1];
+		const uint_fast64_t upTime = downTime + timeStamps[size-2] - timeStamps[size-3];
+		timeStamps.push_back(downTime);
+		timeStamps.push_back(upTime);
 	}
-
 
 }

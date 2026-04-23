@@ -1,6 +1,6 @@
 # ReADOFAIMacro
 
-一个使用 C++20 编写的 A Dance of Fire and Ice 宏工具项目
+使用 C++20 重写的 A Dance of Fire and Ice 宏工具项目
 
 可以加载，解析并自动播放谱面
 
@@ -8,7 +8,7 @@
 
 ## 使用:
 
-在Main.cpp中修改vks来分配使用哪些按键，一个按键会分配一个线程，建议分配CPU核心/2个左右
+在Main.cpp中修改keySequence.p1来决定使用的按键
 
 script.play()的第二个参数是一个按键，运行程序后在ADOFAI里打开谱面，在第一个轨道上点击这个按键就会开始播放谱面
 
