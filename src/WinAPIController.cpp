@@ -1,4 +1,5 @@
 #include <WinAPIController.h>
+#include <iostream>
 
 uint_fast64_t getTimestampMs() {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -29,7 +30,7 @@ void releaseKeys() {
 
 namespace ReADOFAIMacro {
 
-	std::vector<INPUT> convertInputEvents(const std::vector<InputEvent>& events) {
+	auto WinAPIController::convertInputEvents(const std::vector<InputEvent>& events, const KeySequence& keySequence) -> std::vector<INPUT> {
 		const size_t inputSize = events.size();
 		std::vector<INPUT> inputs;
 		for (int i = 0; i < inputSize; i++) {
@@ -39,7 +40,7 @@ namespace ReADOFAIMacro {
 			if (!e.state) {
 				input.ki.dwFlags = KEYEVENTF_KEYUP;
 			}
-			input.ki.wVk = *e.key;
+			input.ki.wVk = getKeyFromOffset(keySequence,e.key);
 			inputs.push_back(input);
 		}
 		return inputs;
@@ -55,10 +56,12 @@ namespace ReADOFAIMacro {
 		releaseKeys();
 	}
 
-	void WinAPIController::play(const PlayScript& script, VK waitForKey) {
+	void WinAPIController::play(const PlayScript& script, const KeySequence& keySequence, VK waitForKey) {
 		if (running) return;
-		const auto& inputs = convertInputEvents(script.getInputs());
+		const auto& inputs = convertInputEvents(script.getInputs(), keySequence);
 		auto timeStamps = script.getTimeStamps();
+
+		std::cout << "done.\n";
 
 		while (!(GetAsyncKeyState(waitForKey) & 0x8000)) {}
 		uint_fast64_t baseTimeStamp = getTimestampMs();

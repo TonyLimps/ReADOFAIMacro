@@ -1,6 +1,8 @@
 #include <Level.h>
 #include <PlayScript.h>
 
+#include <limits>
+
 // 规范化角度
 static double standardizeDegree(double angle) {
 	// 冰与火没有0度旋转角，但有360度发卡弯，角度有效范围是(0, 360]
@@ -85,50 +87,523 @@ namespace ReADOFAIMacro {
 			});
 		}
 	}
-	auto computeTimeStamps(const Level& level, std::vector<double>& rotationAngles, double bpm) -> std::vector<uint_fast64_t> {
+	auto computeTimeStamps(std::vector<double>& rotationAngles, double bpm) -> std::vector<uint_fast64_t> {
 		std::vector<uint_fast64_t> timeStamps;
+		rotationAngles.erase(rotationAngles.begin());
 		const size_t size = rotationAngles.size();
-		timeStamps.reserve(size);
+		timeStamps.reserve(size+1);
 		timeStamps.push_back(0);
 
 		double accumulatedMs = 0.0;
 
-		for (int index = 1; index < size; index++) {
-			if (level.isMidSpin(index + 1))
-				continue;
-			const double theta = rotationAngles.at(index);
+		for (int index = 0; index < size; index++) {
+			const double theta = rotationAngles[index];
 			const double relMs = theta / 180.0 / bpm * 60.0 * 1000.0;
 			accumulatedMs += relMs;
 			timeStamps.push_back(static_cast<uint_fast64_t>(std::round(accumulatedMs)));
 		}
 		return timeStamps;
 	}
-	PlayScript::PlayScript(const Level& level) {
-		double bpm = level.getSetting<double>("bpm");
+
+	void removeMidSpin(const Level& level, std::vector<double>& rotationAngles) {
+		const size_t size = rotationAngles.size();
+		for (size_t i = size; i > 0; i--) {
+			if (level.isMidSpin(i)) {
+				rotationAngles.erase(rotationAngles.begin()+i-1);
+			}
+		}
+	}
+
+	void sort(std::vector<InputEvent>& events, std::vector<uint_fast64_t>& timeStamps) {
+		if (timeStamps.size() <= 1 || events.size() != timeStamps.size()) return;
+
+		std::vector<size_t> indices(timeStamps.size());
+		for (size_t i = 0; i < indices.size(); ++i) {
+			indices[i] = i;
+		}
+
+		std::sort(indices.begin(), indices.end(), [&timeStamps](size_t a, size_t b) {
+			return timeStamps[a] < timeStamps[b];
+		});
+
+		std::vector<uint_fast64_t> sortedTimeStamps(timeStamps.size());
+		std::vector<InputEvent> sortedEvents(events.size());
+		for (size_t i = 0; i < indices.size(); ++i) {
+			sortedTimeStamps[i] = timeStamps[indices[i]];
+			sortedEvents[i] = events[indices[i]];
+		}
+
+		timeStamps = std::move(sortedTimeStamps);
+		events = std::move(sortedEvents);
+	}
+
+	PlayScript::PlayScript(const Level& level, double maxIndexingBpm) {
+		double baseBpm = level.getSetting<double>("bpm");
+		while (baseBpm <= 550) baseBpm *= 2;
+		while (baseBpm > 1100) baseBpm /= 2;
+		if (baseBpm > maxIndexingBpm) baseBpm /= 2;
+
 		std::vector<double> rotationAngles = computeRotationAngles(level);
 		processTwirl(level,rotationAngles);
 		processPause(level,rotationAngles);
-		processSetSpeed(level,rotationAngles,bpm);
-		std::vector<uint_fast64_t> floorTimeStamps = computeTimeStamps(level,rotationAngles,bpm);
+		processSetSpeed(level,rotationAngles,baseBpm);
 
-		const size_t size = floorTimeStamps.size();
-		inputs.reserve(size);
-		const InputEvent down{.key = &keySequence.p1, .state = true};
-		const InputEvent up{.key = &keySequence.p1, .state = false};
-		for (int i = 0; i < size-1; i++) {
-			const uint_fast64_t downTime = floorTimeStamps[i];
-			const uint_fast64_t upTime = (downTime + floorTimeStamps[i+1]) / 2;
-			inputs.push_back(down);
-			timeStamps.push_back(downTime);
-			inputs.push_back(up);
-			timeStamps.push_back(upTime);
+		// 计算时间戳(会删去开头不用打的轨道的旋转角)
+		removeMidSpin(level,rotationAngles);
+		floorTimeStamps = computeTimeStamps(rotationAngles,baseBpm);
+		// 避免allocateFingers边界检查
+		floorTimeStamps.push_back(2*floorTimeStamps[floorTimeStamps.size()-1]-floorTimeStamps[floorTimeStamps.size()-2]);
+		rotationAngles.push_back(rotationAngles[rotationAngles.size()-1]);
+
+		size_t size = rotationAngles.size();
+
+		inputs.reserve(size*2);
+		timeStamps.reserve(size*2);
+		size_t index = 0;
+		std::vector<std::pair<int,double>> countsAndDegrees;
+		while (index < size) {
+			double degree = 0;
+			int count = 0;
+			do {
+				degree += rotationAngles.at(index);
+				index++;count++;
+			} while (degree < 180 && index < size);
+			countsAndDegrees.emplace_back(count,degree);
 		}
-		inputs.push_back(down);
-		inputs.push_back(up);
-		const uint_fast64_t downTime = floorTimeStamps[size-1];
-		const uint_fast64_t upTime = downTime + timeStamps[size-2] - timeStamps[size-3];
-		timeStamps.push_back(downTime);
-		timeStamps.push_back(upTime);
+
+		size = countsAndDegrees.size();
+		countsAndDegrees.emplace_back(std::numeric_limits<int>::max(),std::numeric_limits<double>::max());
+		bool usePreferredHand = true;
+		for (index = 0; index < size; index++) {
+			auto pair = countsAndDegrees[index];
+			auto next = countsAndDegrees[index+1];
+			bool lasting = false;
+			if (pair.second <= 270) {
+				lasting = true;
+			}
+			allocateFingers(pair.first, usePreferredHand, lasting);
+			if (pair.second <= 270) {
+				usePreferredHand = !usePreferredHand;
+			} else if (pair.second <= 450) {
+				continue;
+			} else if (pair.second <= 630) {
+				usePreferredHand = !usePreferredHand;
+			} else if (pair.second <= 810) {
+				continue;
+			} else {
+				usePreferredHand = true;
+			}
+		}
+		sort(inputs,timeStamps);
+	}
+
+	void PlayScript::allocateFingers(int count, bool usePreferredHand, bool lasting, bool recursion) {
+		if (count <= 0) {
+			return;
+		}
+		if (usePreferredHand) {
+			if (count == 1) {
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(p1,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				} else {
+					timeStamps.push_back((floorTimeStamps[allocatingIndex]+floorTimeStamps[allocatingIndex+1])/2);
+				}
+			} else if (count == 2) {
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(p2,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+2] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 3) {
+				inputs.emplace_back(p3,true);
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(p2,false);
+				inputs.emplace_back(p3,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				} else {
+
+					timeStamps.push_back(timeStamps[allocatingIndex1+2] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 4) {
+				inputs.emplace_back(p4,true);
+				inputs.emplace_back(p3,true);
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(p2,false);
+				inputs.emplace_back(p3,false);
+				inputs.emplace_back(p4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 5) {
+				inputs.emplace_back(p4,true);
+				inputs.emplace_back(p3,true);
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(sp1,true);
+				inputs.emplace_back(sp1,false);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(p2,false);
+				inputs.emplace_back(p3,false);
+				inputs.emplace_back(p4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+3]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+3]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+8] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 6) {
+				inputs.emplace_back(p4,true);
+				inputs.emplace_back(p3,true);
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(sp2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(sp1,true);
+				inputs.emplace_back(sp1,false);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(sp2,false);
+				inputs.emplace_back(p2,false);
+				inputs.emplace_back(p3,false);
+				inputs.emplace_back(p4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+6]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+5] - timeStamps[allocatingIndex1+4]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+5] - timeStamps[allocatingIndex1+4]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+2]);
+				timeStamps[allocatingIndex1+8] = timeStamps[allocatingIndex1+9] - timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+2];
+				timeStamps.push_back(timeStamps[allocatingIndex1+9] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+10] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 7) {
+				inputs.emplace_back(p4,true);
+				inputs.emplace_back(sp4,true);
+				inputs.emplace_back(p3,true);
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(sp2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(sp1,true);
+				inputs.emplace_back(sp1,false);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(sp2,false);
+				inputs.emplace_back(p2,false);
+				inputs.emplace_back(p3,false);
+				inputs.emplace_back(sp4,false);
+				inputs.emplace_back(p4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+6]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+7]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+6] - timeStamps[allocatingIndex1+5]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+6] - timeStamps[allocatingIndex1+5]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+8] + timeStamps[allocatingIndex1+5] - timeStamps[allocatingIndex1+3]);
+				timeStamps[allocatingIndex1+9] = timeStamps[allocatingIndex1+10] - timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+3];
+				timeStamps.push_back(timeStamps[allocatingIndex1+10] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+11] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+0]);
+				timeStamps[allocatingIndex1+12] = timeStamps[allocatingIndex1+13] - timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+0];
+			} else if (count == 8) {
+				inputs.emplace_back(p4,true);
+				inputs.emplace_back(sp4,true);
+				inputs.emplace_back(p3,true);
+				inputs.emplace_back(sp3,true);
+				inputs.emplace_back(p2,true);
+				inputs.emplace_back(sp2,true);
+				inputs.emplace_back(p1,true);
+				inputs.emplace_back(sp1,true);
+				inputs.emplace_back(sp1,false);
+				inputs.emplace_back(p1,false);
+				inputs.emplace_back(sp2,false);
+				inputs.emplace_back(p2,false);
+				inputs.emplace_back(sp3,false);
+				inputs.emplace_back(p3,false);
+				inputs.emplace_back(sp4,false);
+				inputs.emplace_back(p4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+6]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+7]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+8]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+7] - timeStamps[allocatingIndex1+6]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+8] + timeStamps[allocatingIndex1+7] - timeStamps[allocatingIndex1+6]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+9] + timeStamps[allocatingIndex1+6] - timeStamps[allocatingIndex1+4]);
+				timeStamps[allocatingIndex1+10] = timeStamps[allocatingIndex1+11] - timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+4];
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+11] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+2]);
+				timeStamps[allocatingIndex1+12] = timeStamps[allocatingIndex1+13] - timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+2];
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+13] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+0]);
+				timeStamps[allocatingIndex1+14] = timeStamps[allocatingIndex1+15] - timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+0];
+			} else {
+				allocatingIndex -= count;
+				allocatingIndex1 -= count*2;
+				int thisHandKeyCount = count / 2;
+				int nextHandKeyCount = count - thisHandKeyCount;
+				allocateFingers(thisHandKeyCount, true, lasting,true);
+				allocateFingers(nextHandKeyCount, false, lasting,true);
+			}
+		} else {
+			if (count == 1) {
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(n1,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				} else {
+					timeStamps.push_back((floorTimeStamps[allocatingIndex]+floorTimeStamps[allocatingIndex+1])/2);
+				}
+			} else if (count == 2) {
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(n2,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+2] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 3) {
+				inputs.emplace_back(n3,true);
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(n2,false);
+				inputs.emplace_back(n3,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				} else {
+
+					timeStamps.push_back(timeStamps[allocatingIndex1+2] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 4) {
+				inputs.emplace_back(n4,true);
+				inputs.emplace_back(n3,true);
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(n2,false);
+				inputs.emplace_back(n3,false);
+				inputs.emplace_back(n4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 5) {
+				inputs.emplace_back(n4,true);
+				inputs.emplace_back(n3,true);
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(sn1,true);
+				inputs.emplace_back(sn1,false);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(n2,false);
+				inputs.emplace_back(n3,false);
+				inputs.emplace_back(n4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+3]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+3]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+8] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 6) {
+				inputs.emplace_back(n4,true);
+				inputs.emplace_back(n3,true);
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(sn2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(sn1,true);
+				inputs.emplace_back(sn1,false);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(sn2,false);
+				inputs.emplace_back(n2,false);
+				inputs.emplace_back(n3,false);
+				inputs.emplace_back(n4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+6]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+5] - timeStamps[allocatingIndex1+4]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+5] - timeStamps[allocatingIndex1+4]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+2]);
+				timeStamps[allocatingIndex1+8] = timeStamps[allocatingIndex1+9] - timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+2];
+				timeStamps.push_back(timeStamps[allocatingIndex1+9] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+1]);
+				timeStamps.push_back(timeStamps[allocatingIndex1+10] + timeStamps[allocatingIndex1+1] - timeStamps[allocatingIndex1+0]);
+			} else if (count == 7) {
+				inputs.emplace_back(n4,true);
+				inputs.emplace_back(sn4,true);
+				inputs.emplace_back(n3,true);
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(sn2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(sn1,true);
+				inputs.emplace_back(sn1,false);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(sn2,false);
+				inputs.emplace_back(n2,false);
+				inputs.emplace_back(n3,false);
+				inputs.emplace_back(sn4,false);
+				inputs.emplace_back(n4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+6]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+7]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+6] + timeStamps[allocatingIndex1+6] - timeStamps[allocatingIndex1+5]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+6] - timeStamps[allocatingIndex1+5]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+8] + timeStamps[allocatingIndex1+5] - timeStamps[allocatingIndex1+3]);
+				timeStamps[allocatingIndex1+9] = timeStamps[allocatingIndex1+10] - timeStamps[allocatingIndex1+4] + timeStamps[allocatingIndex1+3];
+				timeStamps.push_back(timeStamps[allocatingIndex1+10] + timeStamps[allocatingIndex1+3] - timeStamps[allocatingIndex1+2]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+11] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+0]);
+				timeStamps[allocatingIndex1+12] = timeStamps[allocatingIndex1+13] - timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+0];
+			} else if (count == 8) {
+				inputs.emplace_back(n4,true);
+				inputs.emplace_back(sn4,true);
+				inputs.emplace_back(n3,true);
+				inputs.emplace_back(sn3,true);
+				inputs.emplace_back(n2,true);
+				inputs.emplace_back(sn2,true);
+				inputs.emplace_back(n1,true);
+				inputs.emplace_back(sn1,true);
+				inputs.emplace_back(sn1,false);
+				inputs.emplace_back(n1,false);
+				inputs.emplace_back(sn2,false);
+				inputs.emplace_back(n2,false);
+				inputs.emplace_back(sn3,false);
+				inputs.emplace_back(n3,false);
+				inputs.emplace_back(sn4,false);
+				inputs.emplace_back(n4,false);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+1]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+2]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+3]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+4]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+5]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+6]);
+				timeStamps.push_back(floorTimeStamps[allocatingIndex+7]);
+				if (lasting) {
+					timeStamps.push_back(floorTimeStamps[allocatingIndex+8]);
+				} else {
+					timeStamps.push_back(timeStamps[allocatingIndex1+7] + timeStamps[allocatingIndex1+7] - timeStamps[allocatingIndex1+6]);
+				}
+				timeStamps.push_back(timeStamps[allocatingIndex1+8] + timeStamps[allocatingIndex1+7] - timeStamps[allocatingIndex1+6]);
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+9] + timeStamps[allocatingIndex1+6] - timeStamps[allocatingIndex1+4]);
+				timeStamps[allocatingIndex1+10] = timeStamps[allocatingIndex1+11] - timeStamps[allocatingIndex1+5] + timeStamps[allocatingIndex1+4];
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+11] + timeStamps[allocatingIndex1+4] - timeStamps[allocatingIndex1+2]);
+				timeStamps[allocatingIndex1+12] = timeStamps[allocatingIndex1+13] - timeStamps[allocatingIndex1+3] + timeStamps[allocatingIndex1+2];
+				timeStamps.push_back(0);
+				timeStamps.push_back(timeStamps[allocatingIndex1+13] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+0]);
+				timeStamps[allocatingIndex1+14] = timeStamps[allocatingIndex1+15] - timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+0];
+			} else {
+				allocatingIndex -= count;
+				allocatingIndex1 -= count*2;
+				int thisHandKeyCount = count / 2;
+				int nextHandKeyCount = count - thisHandKeyCount;
+				allocateFingers(thisHandKeyCount, false,  lasting,true);
+				allocateFingers(nextHandKeyCount, true,  lasting,true);
+			}
+		}
+		allocatingIndex += count;
+		allocatingIndex1 += count*2;
 	}
 
 }

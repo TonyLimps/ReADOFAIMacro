@@ -110,19 +110,33 @@ namespace ReADOFAIMacro {
 		APOSTROPHE = 222
 	};
 
+	enum KeyOffset : int {
+		n4 = 0, n3 = 1, n2 = 2, n1 = 3,
+		p1 = 4, p2 = 5, p3 = 6, p4 = 7,
+		sn4 = 8, sn3 = 9, sn2 = 10, sn1 = 11,
+		sp1 = 12, sp2 = 13, sp3 = 14, sp4 = 15
+	};
+
 	struct KeySequence {
 		// p:主手 n:副手
 		// 这里右手是主手，那么一般键盘上的按键位置映射如下所示
 		VK n4,n3,n2,n1,p1,p2,p3,p4; // 手8
 		VK sn4,sn3,sn2,sn1,sp1,sp2,sp3,sp4; // 手16
-		VK tn4,tn3,tn2,tn1,tp1,tp2,tp3,tp4; // 手键第三排(手18键可能用)
+		// 暂时用不上的
+		// VK tn4,tn3,tn2,tn1,tp1,tp2,tp3,tp4; // 手键第三排(手18键可能用)
 
-		VK fn4,fn3,fn2,fn1,fp1,fp2,fp3,fp4; // 脚8
-		VK fsn4,fsn3,fsn2,fsn1,fsp1,fsp2,fsp3,fsp4; // 脚16
+		// VK fn4,fn3,fn2,fn1,fp1,fp2,fp3,fp4; // 脚8
+		// VK fsn4,fsn3,fsn2,fsn1,fsp1,fsp2,fsp3,fsp4; // 脚16
 	};
 
 	struct InputEvent {
-		VK* key;
-		bool state;
+		KeyOffset key{};
+		bool state{};
+
+		InputEvent() = default;
+		InputEvent(KeyOffset key, bool state) {
+			this-> key = key;
+			this-> state = state;
+		}
 	};
 }

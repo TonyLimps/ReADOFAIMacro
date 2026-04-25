@@ -25,7 +25,7 @@ ReferenceAlignment: Left
 DerivePointerAlignment: false
 
 # 行长度限制
-ColumnLimit: 100
+ColumnLimit: 200
 
 # 空格设置
 SpaceAfterCStyleCast: false
