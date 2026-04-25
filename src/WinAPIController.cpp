@@ -1,10 +1,8 @@
-#include <WinAPIController.h>
 #include <iostream>
+#include <WinAPIController.h>
 
 uint_fast64_t getTimestampMs() {
-	return std::chrono::duration_cast<std::chrono::milliseconds>(
-			   std::chrono::system_clock::now().time_since_epoch())
-		.count();
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 bool isMouseAtZero() {
@@ -35,12 +33,59 @@ namespace ReADOFAIMacro {
 		std::vector<INPUT> inputs;
 		for (int i = 0; i < inputSize; i++) {
 			const auto& e = events[i];
-			INPUT input = {};
+			const VK vk = getKeyFromOffset(keySequence, e.key);
+			INPUT input{};
 			input.type = INPUT_KEYBOARD;
 			if (!e.state) {
 				input.ki.dwFlags = KEYEVENTF_KEYUP;
 			}
-			input.ki.wVk = getKeyFromOffset(keySequence,e.key);
+			input.ki.wVk = vk;
+
+			// 扫描码转换
+			// 对于特殊键（左右Ctrl/Alt/Shift等）需要设置扫描码以正确使用SendInput
+			switch (vk) {
+				case LEFT_CONTROL:
+					input.ki.wScan = 0x1D;
+					break;
+				case RIGHT_CONTROL:
+					input.ki.wScan = 0x1D;
+					input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+					break;
+				case LEFT_ALT:
+					input.ki.wScan = 0x38;
+					break;
+				case RIGHT_ALT:
+					input.ki.wScan = 0x38;
+					input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+					break;
+				case LEFT_SHIFT:
+					input.ki.wScan = 0x2A;
+					break;
+				case RIGHT_SHIFT:
+					input.ki.wScan = 0x36;
+					break;
+				case LEFT_WINDOWS:
+					input.ki.wScan = 0x5B;
+					input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+					break;
+				case RIGHT_WINDOWS:
+					input.ki.wScan = 0x5C;
+					input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+					break;
+				case MENU:
+					input.ki.wScan = 0x5D;
+					input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+					break;
+				default:
+					input.ki.wScan = MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC);
+					break;
+			}
+
+			// 如果设置了扫描码，添加KEYEVENTF_SCANCODE标志
+			if (input.ki.wScan != 0) {
+				input.ki.dwFlags |= KEYEVENTF_SCANCODE;
+			}
+
 			inputs.push_back(input);
 		}
 		return inputs;
@@ -57,19 +102,19 @@ namespace ReADOFAIMacro {
 	}
 
 	void WinAPIController::play(const PlayScript& script, const KeySequence& keySequence, VK waitForKey) {
-		if (running) return;
+		if (running)
+			return;
 		const auto& inputs = convertInputEvents(script.getInputs(), keySequence);
 		auto timeStamps = script.getTimeStamps();
 
-		std::cout << "done.\n";
-
-		while (!(GetAsyncKeyState(waitForKey) & 0x8000)) {}
+		while (!(GetAsyncKeyState(waitForKey) & 0x8000)) {
+		}
 		uint_fast64_t baseTimeStamp = getTimestampMs();
 		for (auto& v : timeStamps) {
 			v += baseTimeStamp;
 		}
 		running = true;
-		threads.emplace_back([this, inputs, timeStamps] { pressKeys(inputs, timeStamps);});
+		threads.emplace_back([this, inputs, timeStamps] { pressKeys(inputs, timeStamps); });
 		while (!isMouseAtZero()) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
@@ -89,10 +134,11 @@ namespace ReADOFAIMacro {
 	void WinAPIController::pressKeys(const std::vector<INPUT>& inputs, const std::vector<uint_fast64_t>& timeStamps) const {
 		size_t i = 0;
 		while (running.load()) {
-			while (running.load() && getTimestampMs() < timeStamps[i]) {}
+			while (running.load() && getTimestampMs() < timeStamps[i]) {
+			}
 			SendInput(1, const_cast<LPINPUT>(&inputs[i]), sizeof(INPUT));
 			i++;
 		}
 	}
 
-}
+} // namespace ReADOFAIMacro

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstddef>
-
 namespace ReADOFAIMacro {
 	class Range {
 	public:

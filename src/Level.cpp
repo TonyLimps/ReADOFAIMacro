@@ -1,5 +1,6 @@
 #include <level.h>
 
+#include <iostream>
 #include <fstream>
 #include <regex>
 
@@ -24,13 +25,15 @@ auto pathDataToAngleData(const std::string& pathData) -> std::vector<double> {
 namespace ReADOFAIMacro {
 
 	Level::Level(const std::string& path) {
+		std::cout<<"Loading level file...\n";
 		// 将关卡文件数据加载到angleData,settings,actions,decorations字段中
 		std::ifstream file(path);
 		std::stringstream buffer;
 		buffer << file.rdbuf();
 		std::string jsonString = buffer.str();
-		jsonString = std::regex_replace(jsonString, std::regex("\n"),"");
+		jsonString = std::regex_replace(jsonString, std::regex("[\n\r\t]*\\\\n"),"\\n");
 		jsonString = std::regex_replace(jsonString, std::regex(", *}"),"}");
+		jsonString = std::regex_replace(jsonString, std::regex("\\][\n\t\r\f\v]*\""),"],\"");
 		nlohmann::json json = nlohmann::json::parse(jsonString);
 		file.close();
 		if (json.contains("angleData")) {
@@ -120,6 +123,6 @@ namespace ReADOFAIMacro {
 			twirlRanges.emplace_back(lastTwirlFloor, lastFloor);
 		if (isThreePlanets)
 			threePlanetsRanges.emplace_back(lastThreePlanetsFloor, lastFloor);
+		std::cout<<"done.\n";
 	}
-
 }

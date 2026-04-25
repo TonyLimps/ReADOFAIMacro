@@ -21,6 +21,6 @@ namespace ReADOFAIMacro {
 		std::vector<uint_fast64_t> floorTimeStamps;
 		std::vector<uint_fast64_t> timeStamps;
 
-		void allocateFingers(int count, bool usePreferredHand, bool lasting = true, bool recursion = false);
+		void allocateFingers(int count, bool usePreferredHand, bool lasting = true);
 	};
 }

@@ -1,3 +1,4 @@
+#include <iostream>
 #include <Level.h>
 #include <PlayScript.h>
 
@@ -138,6 +139,7 @@ namespace ReADOFAIMacro {
 	}
 
 	PlayScript::PlayScript(const Level& level, double maxIndexingBpm) {
+		std::cout<<"Parsing level data...\n";
 		double baseBpm = level.getSetting<double>("bpm");
 		while (baseBpm <= 550) baseBpm *= 2;
 		while (baseBpm > 1100) baseBpm /= 2;
@@ -148,6 +150,11 @@ namespace ReADOFAIMacro {
 		processPause(level,rotationAngles);
 		processSetSpeed(level,rotationAngles,baseBpm);
 
+		bool usePreferredHand = true;
+		if (rotationAngles[0] >= 450 && rotationAngles[0] <= 630) {
+			usePreferredHand = false;
+		}
+
 		// 计算时间戳(会删去开头不用打的轨道的旋转角)
 		removeMidSpin(level,rotationAngles);
 		floorTimeStamps = computeTimeStamps(rotationAngles,baseBpm);
@@ -156,6 +163,9 @@ namespace ReADOFAIMacro {
 		rotationAngles.push_back(rotationAngles[rotationAngles.size()-1]);
 
 		size_t size = rotationAngles.size();
+
+		std::cout<<"done.\n";
+		std::cout<<"Analyzing fingering...\n";
 
 		inputs.reserve(size*2);
 		timeStamps.reserve(size*2);
@@ -173,31 +183,31 @@ namespace ReADOFAIMacro {
 
 		size = countsAndDegrees.size();
 		countsAndDegrees.emplace_back(std::numeric_limits<int>::max(),std::numeric_limits<double>::max());
-		bool usePreferredHand = true;
 		for (index = 0; index < size; index++) {
 			auto pair = countsAndDegrees[index];
-			auto next = countsAndDegrees[index+1];
 			bool lasting = false;
 			if (pair.second <= 270) {
 				lasting = true;
 			}
 			allocateFingers(pair.first, usePreferredHand, lasting);
+			if (pair.first > 8) continue; // 递归分配按键时allocateFingers自动换手
 			if (pair.second <= 270) {
 				usePreferredHand = !usePreferredHand;
 			} else if (pair.second <= 450) {
 				continue;
 			} else if (pair.second <= 630) {
 				usePreferredHand = !usePreferredHand;
-			} else if (pair.second <= 810) {
+			} else if (pair.second < 720) {
 				continue;
 			} else {
 				usePreferredHand = true;
 			}
 		}
 		sort(inputs,timeStamps);
+		std::cout<<"done.\n";
 	}
 
-	void PlayScript::allocateFingers(int count, bool usePreferredHand, bool lasting, bool recursion) {
+	void PlayScript::allocateFingers(int count, bool usePreferredHand, bool lasting) {
 		if (count <= 0) {
 			return;
 		}
@@ -394,12 +404,11 @@ namespace ReADOFAIMacro {
 				timeStamps.push_back(timeStamps[allocatingIndex1+13] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+0]);
 				timeStamps[allocatingIndex1+14] = timeStamps[allocatingIndex1+15] - timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+0];
 			} else {
-				allocatingIndex -= count;
-				allocatingIndex1 -= count*2;
 				int thisHandKeyCount = count / 2;
 				int nextHandKeyCount = count - thisHandKeyCount;
-				allocateFingers(thisHandKeyCount, true, lasting,true);
-				allocateFingers(nextHandKeyCount, false, lasting,true);
+				allocateFingers(thisHandKeyCount, true, lasting);
+				allocateFingers(nextHandKeyCount, false, lasting);
+				return;
 			}
 		} else {
 			if (count == 1) {
@@ -594,12 +603,11 @@ namespace ReADOFAIMacro {
 				timeStamps.push_back(timeStamps[allocatingIndex1+13] + timeStamps[allocatingIndex1+2] - timeStamps[allocatingIndex1+0]);
 				timeStamps[allocatingIndex1+14] = timeStamps[allocatingIndex1+15] - timeStamps[allocatingIndex1+1] + timeStamps[allocatingIndex1+0];
 			} else {
-				allocatingIndex -= count;
-				allocatingIndex1 -= count*2;
 				int thisHandKeyCount = count / 2;
 				int nextHandKeyCount = count - thisHandKeyCount;
-				allocateFingers(thisHandKeyCount, false,  lasting,true);
-				allocateFingers(nextHandKeyCount, true,  lasting,true);
+				allocateFingers(thisHandKeyCount, false,  lasting);
+				allocateFingers(nextHandKeyCount, true,  lasting);
+				return;
 			}
 		}
 		allocatingIndex += count;
